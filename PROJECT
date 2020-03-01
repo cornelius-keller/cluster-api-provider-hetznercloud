@@ -1,0 +1,3 @@
+domain: cluster.x-k8s.io
+repo: github.com/cornelius-keller/cluster-api-provider-hetznercloud
+version: "2"
