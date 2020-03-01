@@ -1,3 +1,10 @@
 domain: cluster.x-k8s.io
 repo: github.com/cornelius-keller/cluster-api-provider-hetznercloud
+resources:
+- group: infrastructure
+  kind: HetznerCloudCluster
+  version: v1alpha3
+- group: infrastructure
+  kind: HetznerCloudMachine
+  version: v1alpha3
 version: "2"
