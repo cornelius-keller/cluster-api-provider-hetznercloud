@@ -20,7 +20,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/hetznercloud/hcloud-go/hcloud"
+	"github.com/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,10 +42,47 @@ type HetznerCloudClusterReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudclusters/status,verbs=get;update;patch
 
 func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	_ = context.Background()
+	ctx := context.Background()
 	_ = r.Log.WithValues("hetznercloudcluster", req.NamespacedName)
 
-	// your logic here
+	var hcluster infrastructurev1alpha3.HetznerCloudCluster
+	if err := r.Get(ctx, req.NamespacedName, &hcluster); err != nil {
+		// 	import apierrors "k8s.io/apimachinery/pkg/api/errors"
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	if len(hcluster.Status.APIEndpoints) == 0 {
+		location, _, err := r.HClient.Location.GetByName(ctx, hcluster.Spec.Datacenter)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		floatingip, _, err := r.HClient.FloatingIP.Create(ctx, hcloud.FloatingIPCreateOpts{
+			HomeLocation: location,
+			Type:         hcloud.FloatingIPTypeIPv4,
+		})
+
+		// patch from sigs.k8s.io/cluster-api/util/patch
+
+		helper, err := patch.NewHelper(&hcluster, r.Client)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		hcluster.Status.APIEndpoints = []infrastructurev1alpha3.APIEndpoint{
+			infrastructurev1alpha3.APIEndpoint{
+				Host: floatingip.FloatingIP.IP.String(),
+				Port: 6443,
+			},
+		}
+
+		hcluster.Status.Ready = true
+
+		if err := helper.Patch(ctx, &hcluster); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)
+		}
+	}
 
 	return ctrl.Result{}, nil
 }
