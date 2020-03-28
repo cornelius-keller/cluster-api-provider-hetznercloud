@@ -19,6 +19,7 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
+	"github.com/hetznercloud/hcloud-go/hcloud"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,8 +30,9 @@ import (
 // HetznerCloudClusterReconciler reconciles a HetznerCloudCluster object
 type HetznerCloudClusterReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log     logr.Logger
+	Scheme  *runtime.Scheme
+	HClient *hcloud.Client
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudclusters,verbs=get;list;watch;create;update;patch;delete

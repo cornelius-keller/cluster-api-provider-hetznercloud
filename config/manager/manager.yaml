@@ -5,6 +5,14 @@ metadata:
     control-plane: controller-manager
   name: system
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hetznercloud
+  namespace: system
+stringData:
+  access-token: ${HC_ACCESS_TOKEN}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,6 +37,12 @@ spec:
         - --enable-leader-election
         image: controller:latest
         name: manager
+        env:
+          - name: HC_ACCESS_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hetznercloud
+                key: access-token
         resources:
           limits:
             cpu: 100m

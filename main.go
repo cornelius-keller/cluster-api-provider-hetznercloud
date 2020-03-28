@@ -26,7 +26,9 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
 	// +kubebuilder:scaffold:imports
+	"github.com/hetznercloud/hcloud-go/hcloud"
 )
 
 var (
@@ -64,18 +66,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	token := os.Getenv("HC_ACCESS_TOKEN")
+
+	if token == "" {
+		setupLog.Info("Could not get api token from environment")
+		os.Exit(1)
+	} else {
+		setupLog.Info("succesfully fetched token from os environment")
+	}
+
+	hclient := hcloud.NewClient(hcloud.WithToken(token))
+
 	if err = (&controllers.HetznerCloudClusterReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("HetznerCloudCluster"),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Log:     ctrl.Log.WithName("controllers").WithName("HetznerCloudCluster"),
+		Scheme:  mgr.GetScheme(),
+		HClient: hclient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "HetznerCloudCluster")
 		os.Exit(1)
 	}
 	if err = (&controllers.HetznerCloudMachineReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("HetznerCloudMachine"),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Log:     ctrl.Log.WithName("controllers").WithName("HetznerCloudMachine"),
+		Scheme:  mgr.GetScheme(),
+		HClient: hclient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "HetznerCloudMachine")
 		os.Exit(1)
