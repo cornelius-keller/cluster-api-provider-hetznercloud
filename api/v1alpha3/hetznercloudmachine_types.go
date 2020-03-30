@@ -35,6 +35,10 @@ type HetznerCloudMachineSpec struct {
 type HetznerCloudMachineStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// true if the corresponding cloud vm is ready
+	Ready      bool   `json:"ready"`
+	ProviderId string `json:"providerID"`
 }
 
 // +kubebuilder:subresource:status

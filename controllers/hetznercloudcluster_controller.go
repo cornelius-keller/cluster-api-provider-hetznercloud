@@ -54,7 +54,7 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		return ctrl.Result{}, err
 	}
 
-	if len(hcluster.Status.APIEndpoints) == 0 {
+	if hcluster.Spec.ControlPlaneEndpoint.Host == "" {
 		location, _, err := r.HClient.Location.GetByName(ctx, hcluster.Spec.Datacenter)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -70,11 +70,10 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		hcluster.Status.APIEndpoints = []infrastructurev1alpha3.APIEndpoint{
-			infrastructurev1alpha3.APIEndpoint{
-				Host: floatingip.FloatingIP.IP.String(),
-				Port: 6443,
-			},
+		hcluster.Spec.ControlPlaneEndpoint = infrastructurev1alpha3.APIEndpoint{
+
+			Host: floatingip.FloatingIP.IP.String(),
+			Port: 6443,
 		}
 
 		hcluster.Status.Ready = true

@@ -37,6 +37,20 @@ spec:
         spec:
           description: HetznerCloudClusterSpec defines the desired state of HetznerCloudCluster
           properties:
+            controlPlaneEndpoint:
+              description: ControlPlaneEndpoint represents the endpoint used to communicate
+                with the control plane.
+              properties:
+                host:
+                  description: Host is the hostname on which the API server is serving.
+                  type: string
+                port:
+                  description: Port is the port on which the API server is serving.
+                  type: integer
+              required:
+              - host
+              - port
+              type: object
             datacenter:
               description: Foo is an example field of HetznerCloudCluster. Edit HetznerCloudCluster_types.go
                 to remove/update
@@ -47,23 +61,6 @@ spec:
         status:
           description: HetznerCloudClusterStatus defines the observed state of HetznerCloudCluster
           properties:
-            apiEndpoints:
-              description: APIEndpoints represents the endpoints to communicate with
-                the control plane.
-              items:
-                description: APIEndpoint represents a reachable Kubernetes API endpoint.
-                properties:
-                  host:
-                    description: Host is the hostname on which the API server is serving.
-                    type: string
-                  port:
-                    description: Port is the port on which the API server is serving.
-                    type: integer
-                required:
-                - host
-                - port
-                type: object
-              type: array
             ready:
               description: Ready denotes that the hetzner cluster infrastructure is
                 ready

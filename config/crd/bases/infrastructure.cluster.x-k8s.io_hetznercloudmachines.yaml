@@ -44,6 +44,15 @@ spec:
           type: object
         status:
           description: HetznerCloudMachineStatus defines the observed state of HetznerCloudMachine
+          properties:
+            providerID:
+              type: string
+            ready:
+              description: true if the corresponding cloud vm is ready
+              type: boolean
+          required:
+          - providerID
+          - ready
           type: object
       type: object
   version: v1alpha3

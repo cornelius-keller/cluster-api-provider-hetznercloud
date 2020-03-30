@@ -29,6 +29,10 @@ type HetznerCloudClusterSpec struct {
 
 	// Foo is an example field of HetznerCloudCluster. Edit HetznerCloudCluster_types.go to remove/update
 	Datacenter string `json:"datacenter"`
+
+	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
+	// +optional
+	ControlPlaneEndpoint APIEndpoint `json:"controlPlaneEndpoint"`
 }
 
 // APIEndpoint represents a reachable Kubernetes API endpoint.
@@ -47,10 +51,6 @@ type HetznerCloudClusterStatus struct {
 
 	// Ready denotes that the hetzner cluster infrastructure is ready
 	Ready bool `json:"ready"`
-
-	// APIEndpoints represents the endpoints to communicate with the control plane.
-	// +optional
-	APIEndpoints []APIEndpoint `json:"apiEndpoints,omitempty"`
 }
 
 // +kubebuilder:subresource:status
