@@ -37,7 +37,7 @@ spec:
         spec:
           description: HetznerCloudMachineSpec defines the desired state of HetznerCloudMachine
           properties:
-            foo:
+            type:
               description: Foo is an example field of HetznerCloudMachine. Edit HetznerCloudMachine_types.go
                 to remove/update
               type: string
@@ -51,7 +51,6 @@ spec:
               description: true if the corresponding cloud vm is ready
               type: boolean
           required:
-          - providerID
           - ready
           type: object
       type: object

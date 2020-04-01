@@ -17,8 +17,8 @@ package controllers
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -28,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -46,6 +47,10 @@ type HetznerCloudMachineReconciler struct {
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudmachines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
@@ -67,7 +72,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	}
 	if machine == nil {
 		log.Info("Waiting for Machine Controller to set OwnerRef on DockerMachine")
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: 10}, nil
 	}
 
 	log = log.WithValues("machine", machine.Name)
@@ -75,7 +80,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	// Fetch the Cluster.
 	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, machine.ObjectMeta)
 	if err != nil {
-		log.Info("DockerMachine owner Machine is missing cluster label or cluster does not exist")
+		log.Info("HetznerCloudMachine owner Machine is missing cluster label or cluster does not exist")
 		return ctrl.Result{}, err
 	}
 	if cluster == nil {
@@ -87,19 +92,19 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 
 	// Make sure infrastructure is ready
 	if !cluster.Status.InfrastructureReady {
-		log.Info("Waiting for DockerCluster Controller to create cluster infrastructure")
-		return ctrl.Result{}, nil
+		log.Info("Waiting for HetznerCloudCluster Controller to create cluster infrastructure")
+		return ctrl.Result{Requeue: true, RequeueAfter: 10}, nil
 	}
 
 	// Fetch the HetznerCloudCluster Cluster.
 	hetznerCluster := &infrastructurev1alpha3.HetznerCloudCluster{}
 	hetznerClusterName := client.ObjectKey{
-		Namespace: hetznerCluster.Namespace,
+		Namespace: cluster.Namespace,
 		Name:      cluster.Spec.InfrastructureRef.Name,
 	}
 	if err := r.Client.Get(ctx, hetznerClusterName, hetznerCluster); err != nil {
-		log.Info("DockerCluster is not available yet")
-		return ctrl.Result{}, nil
+		log.Info(fmt.Sprintf("HetznerCloudCluster '%s' is  not available yet in namespace '%s'", hetznerClusterName.Name, hetznerClusterName.Namespace))
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	log = log.WithValues("docker-cluster", hetznerCluster.Name)
@@ -137,8 +142,86 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	*/
 
 	// Handle deleted machines
-	if !hetznerMachine.ObjectMeta.DeletionTimestamp.IsZero() {
-		// return r.reconcileDelete(ctx, machine, hetznerMachine, heztnerMachine, externalLoadBalancer)
+	//if !hetznerMachine.ObjectMeta.DeletionTimestamp.IsZero() {
+	// return r.reconcileDelete(ctx, machine, hetznerMachine, heztnerMachine, externalLoadBalancer)
+	//}
+
+	return r.reconcileNormal(ctx, machine, hetznerMachine, hetznerCluster, log)
+
+}
+
+func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine,
+	hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine, hetznerCluster *infrastructurev1alpha3.HetznerCloudCluster,
+	log logr.Logger) (ctrl.Result, error) {
+
+	// If the DockerMachine doesn't have finalizer, add it.
+	// controllerutil.AddFinalizer(dockerMachine, infrav1.MachineFinalizer)
+
+	// if the machine is already provisioned, return
+	if hetznerMachine.Status.ProviderId != nil {
+		// ensure ready state is set.
+		// This is required after move, bacuse status is not moved to the target cluster.
+		hetznerMachine.Status.Ready = true
+		return ctrl.Result{}, nil
+	}
+
+	// Make sure bootstrap data is available and populated.
+	if machine.Spec.Bootstrap.DataSecretName == nil {
+		log.Info("Waiting for the Bootstrap provider controller to set bootstrap data")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	if hetznerMachine.Status.ProviderId == nil {
+		bootstrapData, err := r.getBootstrapData(ctx, machine)
+		if err != nil {
+			r.Log.Error(err, "failed to get bootstrap data")
+			return ctrl.Result{}, nil
+		}
+
+		// create a machine with the bootstrap data
+
+		sshKey, _, err := r.HClient.SSHKey.Get(ctx, "jck@cornelius-pc")
+		if err != nil {
+			r.Log.Error(err, "failed to get ssh key")
+			return ctrl.Result{}, nil
+		}
+
+		serverOpts := hcloud.ServerCreateOpts{
+			Name: hetznerMachine.Name,
+			ServerType: &hcloud.ServerType{
+				Name: hetznerMachine.Spec.Type,
+			},
+			Image: &hcloud.Image{
+				Name: "ubuntu-18.04",
+			},
+			Location: &hcloud.Location{Name: hetznerCluster.Spec.Datacenter},
+
+			UserData: bootstrapData,
+			SSHKeys: []*hcloud.SSHKey{
+				sshKey,
+			},
+		}
+
+		server, _, err := r.HClient.Server.Create(ctx, serverOpts)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		//r.HClient.FloatingIP.GetByID(ctx, hetznerCluster.Status.FloatingIpId)
+		r.HClient.FloatingIP.Assign(ctx, &hcloud.FloatingIP{ID: hetznerCluster.Status.FloatingIpId}, server.Server)
+
+		// Initialize the patch helper
+		patchHelper, err := patch.NewHelper(hetznerMachine, r)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		serverId := strconv.Itoa(server.Server.ID)
+		hetznerMachine.Status.ProviderId = &serverId
+		hetznerMachine.Status.Ready = true
+		if err := patchHelper.Patch(ctx, hetznerMachine); err != nil {
+			log.Error(err, "failed to patch HetznerCloudMachine")
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -166,5 +249,6 @@ func (r *HetznerCloudMachineReconciler) getBootstrapData(ctx context.Context, ma
 		return "", errors.New("error retrieving bootstrap data: secret value key is missing")
 	}
 
-	return base64.StdEncoding.EncodeToString(value), nil
+	//return base64.StdEncoding.EncodeToString(value), nil
+	return string(value), nil
 }

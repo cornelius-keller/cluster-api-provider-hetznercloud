@@ -77,6 +77,7 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		}
 
 		hcluster.Status.Ready = true
+		hcluster.Status.FloatingIpId = floatingip.FloatingIP.ID
 
 		if err := helper.Patch(ctx, &hcluster); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)

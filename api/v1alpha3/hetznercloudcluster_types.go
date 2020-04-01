@@ -50,7 +50,8 @@ type HetznerCloudClusterStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Ready denotes that the hetzner cluster infrastructure is ready
-	Ready bool `json:"ready"`
+	Ready        bool `json:"ready"`
+	FloatingIpId int  `json:"floatingIpId"`
 }
 
 // +kubebuilder:subresource:status

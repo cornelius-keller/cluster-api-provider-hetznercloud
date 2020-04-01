@@ -27,8 +27,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	// +kubebuilder:scaffold:imports
 	"github.com/hetznercloud/hcloud-go/hcloud"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
+	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -40,6 +41,8 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
 	_ = infrastructurev1alpha3.AddToScheme(scheme)
+
+	_ = clusterv1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 

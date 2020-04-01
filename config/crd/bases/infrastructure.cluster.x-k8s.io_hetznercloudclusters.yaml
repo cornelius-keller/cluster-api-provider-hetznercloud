@@ -61,11 +61,14 @@ spec:
         status:
           description: HetznerCloudClusterStatus defines the observed state of HetznerCloudCluster
           properties:
+            floatingIpId:
+              type: integer
             ready:
               description: Ready denotes that the hetzner cluster infrastructure is
                 ready
               type: boolean
           required:
+          - floatingIpId
           - ready
           type: object
       type: object
