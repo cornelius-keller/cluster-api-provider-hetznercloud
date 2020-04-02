@@ -19,6 +19,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	// MachineFinalizer allows reconciliation loop to clean up resources associated with HetznerCloudMachine before
+	// removing it from the apiserver.
+	MachineFinalizer = "hetznercloudmachine.infrastructure.cluster.x-k8s.io"
+)
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -28,7 +34,7 @@ type HetznerCloudMachineSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of HetznerCloudMachine. Edit HetznerCloudMachine_types.go to remove/update
-	Type string `json:"type,omitempty"`
+	Type string `json:"type"`
 }
 
 // HetznerCloudMachineStatus defines the observed state of HetznerCloudMachine

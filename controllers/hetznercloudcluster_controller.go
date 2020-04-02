@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	infrastructurev1alpha3 "github.com/cornelius-keller/cluster-api-provider-hetznercloud/api/v1alpha3"
 )
@@ -78,10 +79,37 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 
 		hcluster.Status.Ready = true
 		hcluster.Status.FloatingIpId = floatingip.FloatingIP.ID
+		controllerutil.AddFinalizer(&hcluster, infrastructurev1alpha3.ClusterFinalizer)
 
 		if err := helper.Patch(ctx, &hcluster); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)
 		}
+	}
+
+	// handle deleteion
+	if !hcluster.ObjectMeta.DeletionTimestamp.IsZero() {
+
+		helper, err := patch.NewHelper(&hcluster, r.Client)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		_, _, err = r.HClient.FloatingIP.Unassign(ctx, &hcloud.FloatingIP{ID: hcluster.Status.FloatingIpId})
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		_, err = r.HClient.FloatingIP.Delete(ctx, &hcloud.FloatingIP{ID: hcluster.Status.FloatingIpId})
+
+		controllerutil.RemoveFinalizer(&hcluster, infrastructurev1alpha3.ClusterFinalizer)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := helper.Patch(ctx, &hcluster); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)
+		}
+
 	}
 
 	return ctrl.Result{}, nil

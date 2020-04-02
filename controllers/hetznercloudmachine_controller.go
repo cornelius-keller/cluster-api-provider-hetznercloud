@@ -28,12 +28,14 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/hetznercloud/hcloud-go/hcloud"
 	"github.com/pkg/errors"
+	"github.com/prometheus/common/log"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 
@@ -76,8 +78,13 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		return ctrl.Result{}, err
 	}
 	if machine == nil {
-		log.Info("Waiting for Machine Controller to set OwnerRef on DockerMachine")
+		log.Info("Waiting for Machine Controller to set OwnerRef on HetznerCloudMachine")
 		return ctrl.Result{Requeue: true, RequeueAfter: 10}, nil
+	}
+
+	// Handle deleted machines
+	if !hetznerMachine.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, machine, hetznerMachine)
 	}
 
 	log = log.WithValues("machine", machine.Name)
@@ -114,43 +121,6 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 
 	log = log.WithValues("docker-cluster", hetznerCluster.Name)
 
-	// Create a helper for managing the docker container hosting the machine.
-	/*externalMachine, err := docker.NewMachine(cluster.Name, machine.Name, dockerMachine.Spec.CustomImage, log)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
-	}
-
-	// Create a helper for managing a docker container hosting the loadbalancer.
-	// NB. the machine controller has to manage the cluster load balancer because the current implementation of the
-	// docker load balancer does not support auto-discovery of control plane nodes, so CAPD should take care of
-	// updating the cluster load balancer configuration when control plane machines are added/removed
-	externalLoadBalancer, err := docker.NewLoadBalancer(cluster.Name, log)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalLoadBalancer")
-	} */
-
-	// Initialize the patch helper
-	/*
-		patchHelper, err := patch.NewHelper(hetznerMachine, r)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		// Always attempt to Patch the DockerMachine object and status after each reconciliation.
-		defer func() {
-			if err := patchHelper.Patch(ctx, hetznerMachine); err != nil {
-				log.Error(err, "failed to patch DockerMachine")
-				if rerr == nil {
-					rerr = err
-				}
-			}
-		}()
-	*/
-
-	// Handle deleted machines
-	//if !hetznerMachine.ObjectMeta.DeletionTimestamp.IsZero() {
-	// return r.reconcileDelete(ctx, machine, hetznerMachine, heztnerMachine, externalLoadBalancer)
-	//}
-
 	return r.reconcileNormal(ctx, machine, hetznerMachine, hetznerCluster, cluster, log)
 
 }
@@ -158,9 +128,6 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine,
 	hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine, hetznerCluster *infrastructurev1alpha3.HetznerCloudCluster, cluster *clusterv1.Cluster,
 	log logr.Logger) (ctrl.Result, error) {
-
-	// If the DockerMachine doesn't have finalizer, add it.
-	// controllerutil.AddFinalizer(dockerMachine, infrav1.MachineFinalizer)
 
 	// if the machine is already provisioned, return
 	if hetznerMachine.Status.ProviderId != nil {
@@ -293,14 +260,50 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 			return ctrl.Result{}, err
 		}
 
-		serverId := strconv.Itoa(server.Server.ID)
-		hetznerMachine.Status.ProviderId = &serverId
+		// If the HetznerMachine doesn't have finalizer, add it.
+		controllerutil.AddFinalizer(hetznerMachine, infrastructurev1alpha3.MachineFinalizer)
+
+		serverID := strconv.Itoa(server.Server.ID)
+		hetznerMachine.Status.ProviderId = &serverID
 		hetznerMachine.Status.Ready = true
 		if err := patchHelper.Patch(ctx, hetznerMachine); err != nil {
 			log.Error(err, "failed to patch HetznerCloudMachine")
 		}
 	}
 
+	return ctrl.Result{}, nil
+}
+
+func (r *HetznerCloudMachineReconciler) reconcileDelete(ctx context.Context, machine *clusterv1.Machine, hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine) (ctrl.Result, error) {
+	// Long lived CAPD clusters (unadvised) that are using Machine resources for the control plane machines
+	// will have to manually keep the kubeadm config-map on the workload cluster up to date.
+	// This is automated when using the KubeadmControlPlane.
+
+	// delete the machine
+
+	serverid, err := strconv.Atoi(*hetznerMachine.Status.ProviderId)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	_, err = r.HClient.Server.Delete(ctx, &hcloud.Server{ID: serverid})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	// Machine is deleted so remove the finalizer.
+	// Initialize the patch helper
+	patchHelper, err := patch.NewHelper(hetznerMachine, r)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	controllerutil.RemoveFinalizer(hetznerMachine, infrastructurev1alpha3.MachineFinalizer)
+	if err := patchHelper.Patch(ctx, hetznerMachine); err != nil {
+		log.Error(err, "failed to patch HetznerCloudMachine")
+	}
 	return ctrl.Result{}, nil
 }
 
