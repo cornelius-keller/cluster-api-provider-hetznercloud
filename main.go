@@ -29,6 +29,7 @@ import (
 
 	"github.com/hetznercloud/hcloud-go/hcloud"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -43,6 +44,7 @@ func init() {
 	_ = infrastructurev1alpha3.AddToScheme(scheme)
 
 	_ = clusterv1.AddToScheme(scheme)
+	_ = bootstrapv1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 

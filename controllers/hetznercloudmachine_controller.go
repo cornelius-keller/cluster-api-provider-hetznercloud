@@ -16,9 +16,12 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
+	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -35,6 +38,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 
 	infrastructurev1alpha3 "github.com/cornelius-keller/cluster-api-provider-hetznercloud/api/v1alpha3"
+	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha3"
 )
 
 // HetznerCloudMachineReconciler reconciles a HetznerCloudMachine object
@@ -50,6 +54,7 @@ type HetznerCloudMachineReconciler struct {
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigs,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
@@ -146,12 +151,12 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	// return r.reconcileDelete(ctx, machine, hetznerMachine, heztnerMachine, externalLoadBalancer)
 	//}
 
-	return r.reconcileNormal(ctx, machine, hetznerMachine, hetznerCluster, log)
+	return r.reconcileNormal(ctx, machine, hetznerMachine, hetznerCluster, cluster, log)
 
 }
 
 func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine,
-	hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine, hetznerCluster *infrastructurev1alpha3.HetznerCloudCluster,
+	hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine, hetznerCluster *infrastructurev1alpha3.HetznerCloudCluster, cluster *clusterv1.Cluster,
 	log logr.Logger) (ctrl.Result, error) {
 
 	// If the DockerMachine doesn't have finalizer, add it.
@@ -165,6 +170,73 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		return ctrl.Result{}, nil
 	}
 
+	// get kubeadm bootstrap CR for machine
+
+	bootstrapConfig := &bootstrapv1.KubeadmConfig{}
+	bootstrapConfigName := client.ObjectKey{
+		Namespace: machine.Spec.Bootstrap.ConfigRef.Namespace,
+		Name:      machine.Spec.Bootstrap.ConfigRef.Name,
+	}
+	if err := r.Client.Get(ctx, bootstrapConfigName, bootstrapConfig); err != nil {
+		log.Info(fmt.Sprintf("KubeadmConfig '%s' is  not available yet in namespace '%s'", bootstrapConfigName.Name, bootstrapConfigName.Namespace))
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// inject needed fields
+	if len(bootstrapConfig.Spec.Files) == 0 {
+		// add install script
+
+		patchHelper, err := patch.NewHelper(bootstrapConfig, r)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		type Values struct {
+			Ip      string
+			Version string
+		}
+
+		templateValues := Values{Version: *machine.Spec.Version, Ip: cluster.Spec.ControlPlaneEndpoint.Host}
+		for _, tmpl := range cloudConfigTemplates {
+
+			t, err := template.New("test").Parse(tmpl.Template)
+			if err != nil {
+				r.Log.Error(err, "failed to initialize template")
+				return ctrl.Result{}, nil
+			}
+			buffer := new(bytes.Buffer)
+			t.Execute(buffer, templateValues)
+
+			bootstrapConfig.Spec.Files = append(bootstrapConfig.Spec.Files,
+				bootstrapv1.File{Path: tmpl.Path,
+					Permissions: tmpl.Permissions,
+					Content:     buffer.String(),
+				})
+		}
+
+		if util.IsControlPlaneMachine(machine) {
+			bootstrapConfig.Spec.PreKubeadmCommands = []string{
+				"/tmp/install_k8s.sh",
+				"/tmp/set_ip.sh",
+			}
+		} else {
+			bootstrapConfig.Spec.PreKubeadmCommands = []string{
+				"/tmp/install_k8s.sh",
+			}
+		}
+
+		bootstrapConfig.Spec.PostKubeadmCommands = []string{
+			"/bin/systemctl daemon reload",
+			"/bin/systemctl enable kubelet.service",
+			"/bin/systemctl start kubelet.service",
+		}
+
+		patchHelper.Patch(ctx, bootstrapConfig)
+
+	}
+
+	// wait until it gets reconsiled and data is created.
+
 	// Make sure bootstrap data is available and populated.
 	if machine.Spec.Bootstrap.DataSecretName == nil {
 		log.Info("Waiting for the Bootstrap provider controller to set bootstrap data")
@@ -176,6 +248,11 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		if err != nil {
 			r.Log.Error(err, "failed to get bootstrap data")
 			return ctrl.Result{}, nil
+		}
+
+		if !strings.Contains(bootstrapData, "/tmp/install_k8s.sh") {
+			r.Log.Info("bootstrap data does not contain needed files yet")
+			return ctrl.Result{Requeue: true}, nil
 		}
 
 		// create a machine with the bootstrap data
