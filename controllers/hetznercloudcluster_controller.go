@@ -94,12 +94,10 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 			return ctrl.Result{}, err
 		}
 
-		_, _, err = r.HClient.FloatingIP.Unassign(ctx, &hcloud.FloatingIP{ID: hcluster.Status.FloatingIpId})
+		err = r.UnassignFIP(hcluster.Status.FloatingIpId)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-
-		_, err = r.HClient.FloatingIP.Delete(ctx, &hcloud.FloatingIP{ID: hcluster.Status.FloatingIpId})
 
 		controllerutil.RemoveFinalizer(&hcluster, infrastructurev1alpha3.ClusterFinalizer)
 		if err != nil {
@@ -113,6 +111,31 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *HetznerCloudClusterReconciler) UnassignFIP(FloatingIPID int) error {
+	ctx := context.Background()
+	fip, _, err := r.HClient.FloatingIP.GetByID(ctx, FloatingIPID)
+
+	if err != nil {
+		return err
+	}
+
+	if fip.Server != nil {
+		_, _, err = r.HClient.FloatingIP.Unassign(ctx, &hcloud.FloatingIP{ID: FloatingIPID})
+		if err != nil {
+			r.Log.Error(err, "Error unassigning foating ip")
+			return err
+		}
+	}
+
+	_, err = r.HClient.FloatingIP.Delete(ctx, &hcloud.FloatingIP{ID: FloatingIPID})
+	if err != nil {
+		r.Log.Error(err, "Error deleting foating ip")
+		return err
+	}
+	return nil
+
 }
 
 func (r *HetznerCloudClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {

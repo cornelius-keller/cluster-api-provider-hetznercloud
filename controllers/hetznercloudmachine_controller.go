@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -50,6 +51,12 @@ type HetznerCloudMachineReconciler struct {
 	Log     logr.Logger
 	Scheme  *runtime.Scheme
 	HClient *hcloud.Client
+}
+
+var reconcileAfter time.Duration
+
+func init() {
+	reconcileAfter, _ = time.ParseDuration("10s")
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudmachines,verbs=get;list;watch;create;update;patch;delete
@@ -82,7 +89,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	}
 	if machine == nil {
 		log.Info("Waiting for Machine Controller to set OwnerRef on HetznerCloudMachine")
-		return ctrl.Result{Requeue: true, RequeueAfter: 10}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
 	// Handle deleted machines
@@ -108,7 +115,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	// Make sure infrastructure is ready
 	if !cluster.Status.InfrastructureReady {
 		log.Info("Waiting for HetznerCloudCluster Controller to create cluster infrastructure")
-		return ctrl.Result{Requeue: true, RequeueAfter: 10}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
 	// Fetch the HetznerCloudCluster Cluster.
@@ -119,7 +126,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 	}
 	if err := r.Client.Get(ctx, hetznerClusterName, hetznerCluster); err != nil {
 		log.Info(fmt.Sprintf("HetznerCloudCluster '%s' is  not available yet in namespace '%s'", hetznerClusterName.Name, hetznerClusterName.Namespace))
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
 	log = log.WithValues("docker-cluster", hetznerCluster.Name)
@@ -149,7 +156,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 	}
 	if err := r.Client.Get(ctx, bootstrapConfigName, bootstrapConfig); err != nil {
 		log.Info(fmt.Sprintf("KubeadmConfig '%s' is  not available yet in namespace '%s'", bootstrapConfigName.Name, bootstrapConfigName.Namespace))
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
 	// inject needed fields
@@ -230,7 +237,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 	// Make sure bootstrap data is available and populated.
 	if machine.Spec.Bootstrap.DataSecretName == nil {
 		log.Info("Waiting for the Bootstrap provider controller to set bootstrap data")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
 	if hetznerMachine.Status.ProviderId == nil {
@@ -315,7 +322,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 				log.Error(err, "failed to force bootstrap cr reconciliation")
 				return ctrl.Result{}, rerr
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 		}
 
 		// create a machine with the bootstrap data
@@ -348,9 +355,19 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		}
 
 		// assign floating IP if it is a controlplane machine.
-		// TODO: dont't assign floating IP if it is already assigned to another machine.<
 		if util.IsControlPlaneMachine(machine) {
-			r.HClient.FloatingIP.Assign(ctx, &hcloud.FloatingIP{ID: hetznerCluster.Status.FloatingIpId}, server.Server)
+			fip, _, err := r.HClient.FloatingIP.GetByID(ctx, hetznerCluster.Status.FloatingIpId)
+
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			if fip.Server == nil {
+				_, _, err = r.HClient.FloatingIP.Assign(ctx, &hcloud.FloatingIP{ID: hetznerCluster.Status.FloatingIpId}, server.Server)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			}
 		}
 
 		// Initialize the patch helper
