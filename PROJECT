@@ -7,4 +7,7 @@ resources:
 - group: infrastructure
   kind: HetznerCloudMachine
   version: v1alpha3
+- group: infrastructure
+  kind: HetznerCloudMachineTemplate
+  version: v1alpha3
 version: "2"

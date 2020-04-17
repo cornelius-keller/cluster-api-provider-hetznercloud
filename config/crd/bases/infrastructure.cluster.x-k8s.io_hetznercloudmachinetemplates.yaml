@@ -6,20 +6,18 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.4
   creationTimestamp: null
-  name: hetznercloudmachines.infrastructure.cluster.x-k8s.io
+  name: hetznercloudmachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
   names:
-    kind: HetznerCloudMachine
-    listKind: HetznerCloudMachineList
-    plural: hetznercloudmachines
-    singular: hetznercloudmachine
+    kind: HetznerCloudMachineTemplate
+    listKind: HetznerCloudMachineTemplateList
+    plural: hetznercloudmachinetemplates
+    singular: hetznercloudmachinetemplate
   scope: Namespaced
-  subresources:
-    status: {}
   validation:
     openAPIV3Schema:
-      description: HetznerCloudMachine is the Schema for the hetznercloudmachines
+      description: HetznerCloudMachineTemplate is the Schema for the hetznercloudmachinetemplates
         API
       properties:
         apiVersion:
@@ -35,30 +33,33 @@ spec:
         metadata:
           type: object
         spec:
-          description: HetznerCloudMachineSpec defines the desired state of HetznerCloudMachine
+          description: HetznerCloudMachineTemplateSpec defines the desired state of
+            HetznerCloudMachineTemplate
           properties:
-            providerID:
-              type: string
-            type:
-              description: Foo is an example field of HetznerCloudMachine. Edit HetznerCloudMachine_types.go
-                to remove/update
-              type: string
-          required:
-          - type
+            template:
+              description: Foo is an example field of HetznerCloudMachineTemplate.
+                Edit HetznerCloudMachineTemplate_types.go to remove/update
+              properties:
+                spec:
+                  description: HetznerCloudMachineSpec defines the desired state of
+                    HetznerCloudMachine
+                  properties:
+                    providerID:
+                      type: string
+                    type:
+                      description: Foo is an example field of HetznerCloudMachine.
+                        Edit HetznerCloudMachine_types.go to remove/update
+                      type: string
+                  required:
+                  - type
+                  type: object
+              required:
+              - spec
+              type: object
           type: object
         status:
-          description: HetznerCloudMachineStatus defines the observed state of HetznerCloudMachine
-          properties:
-            hetznerServerID:
-              type: string
-            providerID:
-              type: string
-            ready:
-              description: true if the corresponding cloud vm is ready
-              type: boolean
-          required:
-          - hetznerServerID
-          - ready
+          description: HetznerCloudMachineTemplateStatus defines the observed state
+            of HetznerCloudMachineTemplate
           type: object
       type: object
   version: v1alpha3

@@ -8,7 +8,7 @@ type Template struct {
 
 var installScriptTemplate = Template{
 	Template: `#!/bin/sh
-apt-get update && apt-get install -y wget docker.io conntrack
+apt-get update && apt-get install -y wget docker.io conntrack socat ebtables
 cd /
 wget https://github.com/kubernetes/kubernetes/releases/download/{{ .Version }}/kubernetes.tar.gz
 tar -xzf  kubernetes.tar.gz
@@ -39,6 +39,7 @@ var systemdDropIN = Template{
 	Template: `[Service]
 Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
 Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+Environment="KUBELET_EXTRA_ARGS=--cloud-provider=external"
 # This is a file that "kubeadm init" and "kubeadm join" generate at runtime, populating the KUBELET_KUBEADM_ARGS variable dynamically
 EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
 # This is a file that the user can use for overrides of the kubelet args as a last resort. Preferably,

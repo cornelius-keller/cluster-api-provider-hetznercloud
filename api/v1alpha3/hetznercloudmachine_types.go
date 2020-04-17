@@ -35,6 +35,8 @@ type HetznerCloudMachineSpec struct {
 
 	// Foo is an example field of HetznerCloudMachine. Edit HetznerCloudMachine_types.go to remove/update
 	Type string `json:"type"`
+	// +optional
+	ProviderId *string `json:"providerID,omitempty"` // WTF?
 }
 
 // HetznerCloudMachineStatus defines the observed state of HetznerCloudMachine
@@ -45,7 +47,8 @@ type HetznerCloudMachineStatus struct {
 	// true if the corresponding cloud vm is ready
 	Ready bool `json:"ready"`
 	// +optional
-	ProviderId *string `json:"providerID"`
+	ProviderId      *string `json:"providerID"`
+	HetznerServerId *string `json:"hetznerServerID"`
 }
 
 // +kubebuilder:subresource:status

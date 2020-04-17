@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/common/log"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	bootstrapController "sigs.k8s.io/cluster-api/bootstrap/kubeadm/controllers"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -53,11 +54,13 @@ type HetznerCloudMachineReconciler struct {
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=hetznercloudmachines/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines/status,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigs,verbs=get;list;watch;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigs/status,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
 
 func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
@@ -198,7 +201,27 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 			"/bin/systemctl start kubelet.service",
 		}
 
-		patchHelper.Patch(ctx, bootstrapConfig)
+		bootstrapConfig.Status.Ready = false
+		bootstrapConfig.Status.DataSecretName = nil
+
+		if machine.Spec.Bootstrap.DataSecretName != nil {
+			machinePatchHelper, err := patch.NewHelper(machine, r)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			machine.Spec.Bootstrap.DataSecretName = nil
+
+			err = machinePatchHelper.Patch(ctx, machine)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		err = patchHelper.Patch(ctx, bootstrapConfig)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 
 	}
 
@@ -218,7 +241,80 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		}
 
 		if !strings.Contains(bootstrapData, "/tmp/install_k8s.sh") {
+
+			machinePatchHelper, err := patch.NewHelper(machine, r)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			clusterPatchHelper, err := patch.NewHelper(cluster, r)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			bootstrapPatchHelper, err := patch.NewHelper(bootstrapConfig, r)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			cluster.Spec.Paused = true
+
+			err = clusterPatchHelper.Patch(ctx, cluster)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// delete secret
+
+			s := &corev1.Secret{}
+			key := client.ObjectKey{Namespace: machine.GetNamespace(), Name: *machine.Spec.Bootstrap.DataSecretName}
+			if err := r.Client.Get(ctx, key, s); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Client.Delete(ctx, s); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			bootstrapConfig.Status.Ready = false
+			bootstrapConfig.Status.DataSecretName = nil
+			bootstrapConfig.OwnerReferences = nil
+			bootstrapConfig.Spec.JoinConfiguration = nil
+			machine.Spec.Bootstrap.DataSecretName = nil
+			machine.Spec.Bootstrap.ConfigRef.UID = ""
+
+			machine.Status.Phase = "Pending"
+			machine.Status.BootstrapReady = false
+
+			err = machinePatchHelper.Patch(ctx, machine)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			err = bootstrapPatchHelper.Patch(ctx, bootstrapConfig)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			clusterPatchHelper, err = patch.NewHelper(cluster, r)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			cluster.Spec.Paused = false
+
+			err = clusterPatchHelper.Patch(ctx, cluster)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
 			r.Log.Info("bootstrap data does not contain needed files yet")
+
+			_, rerr := (&bootstrapController.KubeadmConfigReconciler{Client: r.Client, Log: r.Log.WithName("controllers").WithName("KubeadmConfig")}).Reconcile(ctrl.Request{NamespacedName: bootstrapConfigName})
+
+			if rerr != nil {
+				log.Error(err, "failed to force bootstrap cr reconciliation")
+				return ctrl.Result{}, rerr
+			}
 			return ctrl.Result{Requeue: true}, nil
 		}
 
@@ -251,8 +347,11 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 			return ctrl.Result{}, err
 		}
 
-		//r.HClient.FloatingIP.GetByID(ctx, hetznerCluster.Status.FloatingIpId)
-		r.HClient.FloatingIP.Assign(ctx, &hcloud.FloatingIP{ID: hetznerCluster.Status.FloatingIpId}, server.Server)
+		// assign floating IP if it is a controlplane machine.
+		// TODO: dont't assign floating IP if it is already assigned to another machine.<
+		if util.IsControlPlaneMachine(machine) {
+			r.HClient.FloatingIP.Assign(ctx, &hcloud.FloatingIP{ID: hetznerCluster.Status.FloatingIpId}, server.Server)
+		}
 
 		// Initialize the patch helper
 		patchHelper, err := patch.NewHelper(hetznerMachine, r)
@@ -264,7 +363,10 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		controllerutil.AddFinalizer(hetznerMachine, infrastructurev1alpha3.MachineFinalizer)
 
 		serverID := strconv.Itoa(server.Server.ID)
-		hetznerMachine.Status.ProviderId = &serverID
+		cloudProviderID := "hcloud://" + serverID
+		hetznerMachine.Status.ProviderId = &cloudProviderID
+		hetznerMachine.Status.HetznerServerId = &serverID
+		hetznerMachine.Spec.ProviderId = &cloudProviderID
 		hetznerMachine.Status.Ready = true
 		if err := patchHelper.Patch(ctx, hetznerMachine); err != nil {
 			log.Error(err, "failed to patch HetznerCloudMachine")
@@ -275,13 +377,10 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 }
 
 func (r *HetznerCloudMachineReconciler) reconcileDelete(ctx context.Context, machine *clusterv1.Machine, hetznerMachine *infrastructurev1alpha3.HetznerCloudMachine) (ctrl.Result, error) {
-	// Long lived CAPD clusters (unadvised) that are using Machine resources for the control plane machines
-	// will have to manually keep the kubeadm config-map on the workload cluster up to date.
-	// This is automated when using the KubeadmControlPlane.
 
 	// delete the machine
 
-	serverid, err := strconv.Atoi(*hetznerMachine.Status.ProviderId)
+	serverid, err := strconv.Atoi(*hetznerMachine.Status.HetznerServerId)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

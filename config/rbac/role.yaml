@@ -11,6 +11,7 @@ rules:
   resources:
   - secrets
   verbs:
+  - delete
   - get
   - list
   - watch
@@ -24,12 +25,23 @@ rules:
   - patch
   - watch
 - apiGroups:
+  - bootstrap.cluster.x-k8s.io
+  resources:
+  - kubeadmconfigs/status
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - cluster.x-k8s.io
   resources:
   - clusters
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - cluster.x-k8s.io
@@ -38,6 +50,18 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machines/status
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - cluster.x-k8s.io
