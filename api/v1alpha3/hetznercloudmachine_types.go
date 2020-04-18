@@ -35,6 +35,10 @@ type HetznerCloudMachineSpec struct {
 
 	// Foo is an example field of HetznerCloudMachine. Edit HetznerCloudMachine_types.go to remove/update
 	Type string `json:"type"`
+
+	// name of the ssh key to access machine
+	SSHKey string `json:"sshKey"`
+
 	// +optional
 	ProviderId *string `json:"providerID,omitempty"` // WTF?
 }

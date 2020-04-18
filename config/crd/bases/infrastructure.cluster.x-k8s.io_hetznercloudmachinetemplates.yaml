@@ -46,11 +46,15 @@ spec:
                   properties:
                     providerID:
                       type: string
+                    sshKey:
+                      description: name of the ssh key to access machine
+                      type: string
                     type:
                       description: Foo is an example field of HetznerCloudMachine.
                         Edit HetznerCloudMachine_types.go to remove/update
                       type: string
                   required:
+                  - sshKey
                   - type
                   type: object
               required:

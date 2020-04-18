@@ -327,7 +327,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 
 		// create a machine with the bootstrap data
 
-		sshKey, _, err := r.HClient.SSHKey.Get(ctx, "jck@cornelius-pc")
+		sshKey, _, err := r.HClient.SSHKey.Get(ctx, hetznerMachine.Spec.SSHKey)
 		if err != nil {
 			r.Log.Error(err, "failed to get ssh key")
 			return ctrl.Result{}, nil
