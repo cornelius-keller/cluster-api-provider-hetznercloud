@@ -129,7 +129,7 @@ func (r *HetznerCloudMachineReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		return ctrl.Result{Requeue: true, RequeueAfter: reconcileAfter}, nil
 	}
 
-	log = log.WithValues("docker-cluster", hetznerCluster.Name)
+	log = log.WithValues("hetzner-cloud-cluster", hetznerCluster.Name)
 
 	return r.reconcileNormal(ctx, machine, hetznerMachine, hetznerCluster, cluster, log)
 
@@ -191,7 +191,12 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 				})
 		}
 
-		if util.IsControlPlaneMachine(machine) {
+		FloatingIPassinged, err := r.IsFloatingIPAssigned(ctx, *hetznerCluster)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if util.IsControlPlaneMachine(machine) && !FloatingIPassinged {
 			bootstrapConfig.Spec.PreKubeadmCommands = []string{
 				"/tmp/install_k8s.sh",
 				"/tmp/set_ip.sh",
@@ -203,7 +208,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		}
 
 		bootstrapConfig.Spec.PostKubeadmCommands = []string{
-			"/bin/systemctl daemon reload",
+			"/bin/systemctl daemon-reload",
 			"/bin/systemctl enable kubelet.service",
 			"/bin/systemctl start kubelet.service",
 		}
@@ -447,4 +452,19 @@ func (r *HetznerCloudMachineReconciler) getBootstrapData(ctx context.Context, ma
 
 	//return base64.StdEncoding.EncodeToString(value), nil
 	return string(value), nil
+}
+
+func (r *HetznerCloudMachineReconciler) IsFloatingIPAssigned(ctx context.Context, cluster infrastructurev1alpha3.HetznerCloudCluster) (bool, error) {
+	fip, _, err := r.HClient.FloatingIP.GetByID(ctx, cluster.Status.FloatingIpId)
+
+	if err != nil {
+		return false, err
+	}
+
+	if fip.Server != nil {
+		return true, nil
+	}
+
+	return false, nil
+
 }
