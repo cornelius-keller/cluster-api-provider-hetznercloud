@@ -9,6 +9,7 @@ type Template struct {
 var installScriptTemplate = Template{
 	Template: `#!/bin/sh
 apt-get update && apt-get install -y wget docker.io conntrack socat ebtables
+systemctl enable docker.service
 cd /
 wget https://github.com/kubernetes/kubernetes/releases/download/{{ .Version }}/kubernetes.tar.gz
 tar -xzf  kubernetes.tar.gz
@@ -22,6 +23,7 @@ find /kubernetes/server/bin/  -type f -executable  -exec  ln -vs "{}" /usr/bin/ 
 var systemdUnit = Template{Template: `[Unit]
 Description=kubelet: The Kubernetes Node Agent
 Documentation=http://kubernetes.io/docs/
+
 
 [Service]
 ExecStart=/usr/bin/kubelet

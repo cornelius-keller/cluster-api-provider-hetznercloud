@@ -140,10 +140,25 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 	log logr.Logger) (ctrl.Result, error) {
 
 	// if the machine is already provisioned, return
-	if hetznerMachine.Status.ProviderId != nil {
+	if hetznerMachine.Spec.ProviderId != nil {
 		// ensure ready state is set.
 		// This is required after move, bacuse status is not moved to the target cluster.
+		patchHelper, err := patch.NewHelper(hetznerMachine, r)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		hetznerMachine.Status.Ready = true
+		hetznerMachine.Status.ProviderId = hetznerMachine.Spec.ProviderId
+
+		serverID := strings.Replace(*hetznerMachine.Spec.ProviderId, "hcloud//:", "", 1)
+		hetznerMachine.Status.HetznerServerId = &serverID
+
+		err = patchHelper.Patch(ctx, hetznerMachine)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		return ctrl.Result{}, nil
 	}
 

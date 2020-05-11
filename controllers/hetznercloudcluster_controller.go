@@ -84,6 +84,34 @@ func (r *HetznerCloudClusterReconciler) Reconcile(req ctrl.Request) (ctrl.Result
 		if err := helper.Patch(ctx, &hcluster); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)
 		}
+
+	} else if hcluster.Spec.ControlPlaneEndpoint.Host != "" && hcluster.Status.Ready == false {
+		// support pivoting
+		floatingips, err := r.HClient.FloatingIP.All(ctx)
+
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		for _, ip := range floatingips {
+			if ip.IP.String() == hcluster.Spec.ControlPlaneEndpoint.Host {
+				helper, err := patch.NewHelper(&hcluster, r.Client)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				hcluster.Status.Ready = true
+				hcluster.Status.FloatingIpId = ip.ID
+				controllerutil.AddFinalizer(&hcluster, infrastructurev1alpha3.ClusterFinalizer)
+
+				if err := helper.Patch(ctx, &hcluster); err != nil {
+					return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", hcluster.Name)
+				}
+			}
+		}
+		if hcluster.Status.Ready == false {
+			return ctrl.Result{}, errors.New("floating ip not found but present in spec")
+		}
+
 	}
 
 	// handle deleteion
