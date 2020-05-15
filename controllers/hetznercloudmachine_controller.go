@@ -151,7 +151,7 @@ func (r *HetznerCloudMachineReconciler) reconcileNormal(ctx context.Context, mac
 		hetznerMachine.Status.Ready = true
 		hetznerMachine.Status.ProviderId = hetznerMachine.Spec.ProviderId
 
-		serverID := strings.Replace(*hetznerMachine.Spec.ProviderId, "hcloud//:", "", 1)
+		serverID := strings.Replace(*hetznerMachine.Spec.ProviderId, "hcloud://", "", 1)
 		hetznerMachine.Status.HetznerServerId = &serverID
 
 		err = patchHelper.Patch(ctx, hetznerMachine)
